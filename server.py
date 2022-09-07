@@ -25,6 +25,7 @@ class server_base():
         self.message_keywords.add("POST_MESSAGE")
         self.message_keywords.add("GET_MESSAGES")
         self.message_keywords.add("INIT_MIRROR")
+        self.message_keywords.add("GET_MIRROR")
         print("UDP server up and listening")
         # Listen for incoming datagrams
 
@@ -52,7 +53,24 @@ class server_base():
                 self.bytesToSend = str.encode(json.dumps(self.temp_msg))
                 for x in list(self.clients):
                     self.UDPServerSocket.sendto(self.bytesToSend, x)
-                    print(f'sent GET CLIENTS to {address}')
+                    print(f'sent GET CLIENTS to {x}')
+            
+            if message == "GET_MIRROR":
+                recv = [receivers for receivers in list(self.clients) if receivers != address]
+                self.temp_msg = {"GET_MIRROR":address}
+                self.bytesToSend = str.encode(json.dumps(self.temp_msg))
+                for x in recv:
+                    self.UDPServerSocket.sendto(self.bytesToSend, x)
+                    print(f'sent GET MIRROR to {x}')
+
+            if type(message) is dict:
+                if list(message.keys())[0].split(" ")[0] == "INIT_MIRROR":
+                    #TODO
+                    message[list(message.keys())[0]]["sender"] = address
+                    self.temp_msg = {"INIT_MIRROR":message}
+                    self.bytesToSend = str.encode(json.dumps(self.temp_msg))
+                    print(self.bytesToSend)
+                    self.UDPServerSocket.sendto(self.bytesToSend, (message[list(message.keys())[0]]["receiver"][0],message[list(message.keys())[0]]["receiver"][1]))
                 
             if str(message) not in self.message_keywords:
                 self.clients_data[str(address)] = message
@@ -63,6 +81,6 @@ class server_base():
                     if clients not in self.message_keywords:
                         self.UDPServerSocket.sendto(self.bytesToSend, self.clients_data[clients][clients])
                         #print(f'sending{self.clients_data}')
-                        
+
 if __name__ == "__main__":
     server_base().start()

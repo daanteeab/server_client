@@ -1,5 +1,6 @@
 from ursina import *
 from client import client_base
+import mirror_entities
 import json
 
 class ursinaClientSide(client_base):
@@ -46,6 +47,8 @@ class Receiver():
         self.message_keywords.add("GET_CLIENTS")
         self.message_keywords.add("POST_MESSAGE")
         self.message_keywords.add("GET_MESSAGES")
+        self.message_keywords.add("INIT_MIRROR")
+        self.message_keywords.add("GET_MIRROR")
         self.rubber = {}
         self.msg_keywords = {"Entity"}
         self.rubber_var = 0.020
@@ -58,11 +61,19 @@ class Receiver():
             self.id = self.client.msg[keys]
             self.client.id = self.client.msg[keys]
             print(f'set id to {self.client.msg[keys]}')
+        
+    def _get_mirror(self, keys):
+        if keys == "GET_MIRROR":
+            attrs_to_send = {f'INIT_MIRROR FROM {self.client.id} TO {self.client.msg["GET_MIRROR"]}':{"class":"cubeMirror","receiver":self.client.msg["GET_MIRROR"]}}
+            bytesToSend = str.encode(json.dumps(attrs_to_send))
+            print(f'GET_MIRROR request: {attrs_to_send}')
+            self.client.UDPClientSocket.sendto(bytesToSend, self.client.serverAddressPort)
 
     def pass_old_msg(self, keys):
-        if time.time()-self.client.msg[keys]["time"]>self.rubber_var:
-            self.rubber_var += 0.005
-            pass
+        if keys == "time":
+            if time.time()-self.client.msg[keys]["time"]>self.rubber_var:
+                self.rubber_var += 0.005
+                pass
 
     def update(self):
         msgFromServer = self.client.UDPClientSocket.recvfrom(self.client.bufferSize)
@@ -70,6 +81,7 @@ class Receiver():
 
         for keys in self.client.msg:
             self._get_id(keys=keys)
+            self._get_mirror(keys=keys)
             if keys not in self.message_keywords:
                 if self.client.msg[keys][keys] == self.id:
                     self.pass_old_msg(keys=keys)
@@ -112,6 +124,32 @@ class RequestMirror():
         self.entity = entity
         self.has_mirrors = set([])
     
+    def new_mirror_condition(self):
+        for x in list(self.client.__handshakes__):
+            if x not in self.has_mirrors:
+                init_msg = "GET_MIRROR"
+                bytesToSend = str.encode(json.dumps(init_msg))
+                self.client.UDPClientSocket.sendto(bytesToSend, self.client.serverAddressPort)
+                self.has_mirrors.add(x)
+    
+    def update(self):
+        self.new_mirror_condition()
+
+class InitiateMirror():
+    def __init__(self, client, entity):
+        self.client = client
+        self.entity = entity
+        self.client.instances = {}
+    
+    def parse_client_msg(self):
+        if type(self.client.msg) is dict:
+            if list(self.client.msg.keys())[0] == "INIT_MIRROR":
+                print(self.client.msg["INIT_MIRROR"][list(self.client.msg["INIT_MIRROR"].keys())[0]]["class"])
+                class_ = getattr(mirror_entities, self.client.msg["INIT_MIRROR"][list(self.client.msg["INIT_MIRROR"].keys())[0]]["class"])
+                self.client.instances[str(self.client.msg["INIT_MIRROR"][list(self.client.msg["INIT_MIRROR"].keys())[0]]["sender"])] = class_(parent=self.entity)
+
+    def update(self):
+        self.parse_client_msg()
 
 class lobbyClient(Entity):
     def __init__(self):
@@ -132,6 +170,8 @@ class lobbyClient(Entity):
         self.player_base.add_script(Sender(client=self.ursina_client_side, entity=self.player_base))
         self.player_base.add_script(Receiver(client=self.ursina_client_side, entity=self.player_base))
         self.player_base.add_script(Getter(client=self.ursina_client_side, entity=self.player_base))
+        self.player_base.add_script(RequestMirror(client=self.ursina_client_side, entity=self.player_base))
+        self.player_base.add_script(InitiateMirror(client=self.ursina_client_side, entity=self.player_base))
         self.disconnect_btn.enabled=True
         #self.add_script(Sender(client=self.ursina_client_side, entity=self.player_base))
         #self.add_script(Receiver(client=self.ursina_client_side, entity=self.player_base))
