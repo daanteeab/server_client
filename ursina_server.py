@@ -1,42 +1,19 @@
-import socket
-import json
-import time
 from ursina import *
+from server import server_base
+import json
+import select
 
-class server_base():
+class Handler(server_base):
     def __init__(self, **kwargs):
-        self.localIP = "127.0.0.1"
-        self.localPort = 20001
-        self.bufferSize = 1024
-        for keys, values in kwargs.items():
-            setattr(self, keys, values)
-
-        self.msgFromServer = "Hello UDP Client"
-        self.bytesToSend = str.encode(json.dumps(self.msgFromServer))
-        self.clients = set([])
-        self.clients_data = {}
-        self.temp_msg = "temp msg for keyword answers"
-        # Create a datagram socket
-        self.UDPServerSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-        self.UDPServerSocket.setblocking(0)
-        # Bind to address and ip
-        self.UDPServerSocket.bind((self.localIP, self.localPort))
-        self.message_keywords = set([])
-        self.message_keywords.add("GET_ID")
-        self.message_keywords.add("GET_CLIENTS")
-        self.message_keywords.add("POST_MESSAGE")
-        self.message_keywords.add("GET_MESSAGES")
-        self.message_keywords.add("INIT_MIRROR")
-        self.message_keywords.add("GET_MIRROR")
-        print("UDP server up and listening")
-        # Listen for incoming datagrams
-
-        # Start game attributes
-        self.gametimer = time.time()
-        self.server_entity_id = 0
-
-    def start(self):
-        while(True):
+        super().__init__()
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        self.client_instances = {}
+        self.server_instances = {}
+        
+    def update(self):
+        ready = select.select([self.UDPServerSocket], [], [], 0.01)
+        if ready[0]:
 
             bytesAddressPair = self.UDPServerSocket.recvfrom(self.bufferSize)
 
@@ -55,7 +32,9 @@ class server_base():
 
             if address not in self.clients:
                 self.clients.add(address)
-                
+                self.wp.content += Text(str(address)),
+                self.wp.layout()
+
             if message == "GET_ID":
                 self.temp_msg = {"GET_ID":address}
                 self.bytesToSend = str.encode(json.dumps(self.temp_msg))
@@ -84,16 +63,44 @@ class server_base():
                     self.temp_msg = {"INIT_MIRROR":message}
                     self.bytesToSend = str.encode(json.dumps(self.temp_msg))
                     self.UDPServerSocket.sendto(self.bytesToSend, (message[list(message.keys())[0]]["receiver"][0],message[list(message.keys())[0]]["receiver"][1]))
-                
-            if str(message) not in self.message_keywords:
-                self.clients_data[str(address)] = message
-                self.clients_data[str(address)][str(address)] = address
-                self.bytesToSend = str.encode(json.dumps(self.clients_data))
-                # Sending a reply to client
-                for clients in self.clients_data:
-                    if clients not in self.message_keywords:
+            
+                elif list(message.keys())[0] == "INIT_SERVER_MIRROR":
+                    module = __import__("mirror_entities")
+                    class_ = getattr(module, message["INIT_SERVER_MIRROR"]["class"])
+                    self.client_instances[str(tuple(message["INIT_SERVER_MIRROR"]["sender"]))] = class_()
+                    
+                else:
+                    #the | operator merges two dicts
+                    self.clients_data[str(address)] = {str(address):address} | message
+                    #Animates position based on right click position in world space
+                    self.client_instances[str(address)].animate_position(message["mouse right"], duration=distance(self.client_instances[str(address)].position, message["mouse right"])/self.client_instances[str(address)].speed, curve=curve.linear)
+
+                    #Complements the message before sending out with actual server position to correct wrong client position
+                    #the | operator merges two dicts
+                    self.clients_data[str(address)] = self.clients_data[str(address)] | {"server position":list(self.client_instances[str(address)].position)}
+
+                    #Sends out all client data to all clients
+                    self.bytesToSend = str.encode(json.dumps(self.clients_data))
+                    # Sending a reply to client
+
+                    for clients in self.clients_data:
                         self.UDPServerSocket.sendto(self.bytesToSend, self.clients_data[clients][clients])
                         #print(f'sending{self.clients_data}')
 
+class lobbyClient(Entity):
+    def __init__(self):
+        super().__init__()
+        self.wp = WindowPanel(title='Connections', content=(), parent=camera.ui, position=(-0.7,0.48), scale=(0.3,0.025))
+        self.add_script(Handler(wp=self.wp))
+
 if __name__ == "__main__":
-    server_base().start()
+    app= Ursina()
+    lobbyClient()
+    camera.position = (0,50,0)
+    plane = Entity(model="plane", texture="brick", scale=50, double_sided=True)
+    camera.look_at(plane)
+    
+    def update():
+        camera.z += (held_keys["w"]-held_keys["s"])*time.dt*20
+        camera.x -= (held_keys["a"]-held_keys["d"])*time.dt*20
+    app.run()

@@ -15,6 +15,7 @@ class client_base(Entity):
         
         # Create a UDP socket at client side
         self.UDPClientSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+        self.UDPClientSocket.setblocking(0)
         self.time_var = 0
         self.msg = None
         #self.UDPClientSocket.sendto(self.bytesToSend, self.serverAddressPort)
