@@ -1,7 +1,7 @@
 from ursina import *
 from client import client_base
-import mirror_entities
 import json
+import select
 
 class ursinaClientSide(client_base):
     def __init__(self, **kwargs):
@@ -28,14 +28,20 @@ class Sender():
     def y_rot(self):
         ry_v = (held_keys["q"]-held_keys["e"])*time.dt*20
         return ry_v
-
+    
     def update(self):
-        vector = self.movement()
-        rot_y = self.y_rot()
-        attrs_to_send = {"position":[self.entity.x+vector[0], self.entity.y, self.entity.z+vector[1]],"rotation_y":self.entity.rotation_y+rot_y,"time":time.time()}
-        bytesToSend = str.encode(json.dumps(attrs_to_send))
+        #vector = self.movement()
+        #rot_y = self.y_rot()
+        #attrs_to_send = {"position":[self.entity.x+vector[0], self.entity.y, self.entity.z+vector[1]],"rotation_y":self.entity.rotation_y+rot_y,"time":time.time()}
+        #bytesToSend = str.encode(json.dumps(attrs_to_send))
         #print(f'sending{attrs_to_send}')
-        self.client.UDPClientSocket.sendto(bytesToSend, self.client.serverAddressPort)
+        #self.client.UDPClientSocket.sendto(bytesToSend, self.client.serverAddressPort)
+        if mouse.right:
+            if mouse.world_point is not None:
+                attrs_to_send = {"position":[mouse.world_point.x,mouse.world_point.y,mouse.world_point.z],"rotation_y":self.entity.rotation_y,"time":time.time()}
+                bytesToSend = str.encode(json.dumps(attrs_to_send))
+                print(f'sending{attrs_to_send}')
+                self.client.UDPClientSocket.sendto(bytesToSend, self.client.serverAddressPort)
 
 class Receiver():
     def __init__(self, client, entity):
@@ -51,7 +57,7 @@ class Receiver():
         self.message_keywords.add("GET_MIRROR")
         self.rubber = {}
         self.msg_keywords = {"Entity"}
-        self.rubber_var = 0.020
+        self.rubber_var = 0.016
     
     def rubber(self, ip, attr):
         self.rubber[ip+attr] = []
@@ -70,30 +76,36 @@ class Receiver():
             self.client.UDPClientSocket.sendto(bytesToSend, self.client.serverAddressPort)
 
     def pass_old_msg(self, keys):
-        if keys == "time":
+        if "time" in set(self.client.msg[keys].keys()):
             if time.time()-self.client.msg[keys]["time"]>self.rubber_var:
-                self.rubber_var += 0.005
                 pass
-
+ 
     def update(self):
-        msgFromServer = self.client.UDPClientSocket.recvfrom(self.client.bufferSize)
-        self.client.msg = json.loads(msgFromServer[0])
+        ready = select.select([self.client.UDPClientSocket], [], [], 0.02)
+        if ready[0]:
+            msgFromServer = self.client.UDPClientSocket.recvfrom(self.client.bufferSize)
+            #msgFromServer = self.client.UDPClientSocket.recvfrom(self.client.bufferSize)
+            self.client.msg = json.loads(msgFromServer[0])
+            for keys in self.client.msg:
+                self._get_id(keys=keys)
+                self._get_mirror(keys=keys)
+                if keys not in self.message_keywords:
+                    if self.client.msg[keys][keys] == self.id:
+                        self.pass_old_msg(keys=keys)
+                        [setattr(self.entity, i , self.client.msg[keys][i]) for i in self.client.msg[keys]]
+                        
+                        #'''LIST COMPREHENTION ABOVE REPLACES LOOP BELOW'''#
 
-        for keys in self.client.msg:
-            self._get_id(keys=keys)
-            self._get_mirror(keys=keys)
-            if keys not in self.message_keywords:
-                if self.client.msg[keys][keys] == self.id:
-                    self.pass_old_msg(keys=keys)
-                    [setattr(self.entity, i , self.client.msg[keys][i]) for i in self.client.msg[keys]]
-                    self.rubber_var -= 0.005
-                    
-                    '''LIST COMPREHENTION ABOVE REPLACES LOOP BELOW'''
+                        #for i in self.client.msg[keys]:
+                            #if self.client.msg[keys][i] is float:
+                                #self.rubber()
+                            #setattr(self.entity, i , self.client.msg[keys][i])
 
-                    #for i in self.client.msg[keys]:
-                        #if self.client.msg[keys][i] is float:
-                            #self.rubber()
-                        #setattr(self.entity, i , self.client.msg[keys][i])
+                    if str(self.client.msg[keys][keys]) in self.client.instances:
+                        print(f'setattrs for {self.client.instances[str(self.client.msg[keys][keys])]} with type {type(self.client.instances[str(self.client.msg[keys][keys])])}')
+                        [setattr(self.client.instances[str(self.client.msg[keys][keys])], i , self.client.msg[keys][i]) for i in self.client.msg[keys]]
+
+                        #'''LIST COMPREHENTION ABOVE REPLACES LOOP ABOVE, (does the same thing)'''#
 
 class Getter():
     def __init__(self, client, entity):
@@ -144,9 +156,9 @@ class InitiateMirror():
     def parse_client_msg(self):
         if type(self.client.msg) is dict:
             if list(self.client.msg.keys())[0] == "INIT_MIRROR":
-                print(self.client.msg["INIT_MIRROR"][list(self.client.msg["INIT_MIRROR"].keys())[0]]["class"])
-                class_ = getattr(mirror_entities, self.client.msg["INIT_MIRROR"][list(self.client.msg["INIT_MIRROR"].keys())[0]]["class"])
-                self.client.instances[str(self.client.msg["INIT_MIRROR"][list(self.client.msg["INIT_MIRROR"].keys())[0]]["sender"])] = class_(parent=self.entity)
+                module = __import__("mirror_entities")
+                class_ = getattr(module, self.client.msg["INIT_MIRROR"][list(self.client.msg["INIT_MIRROR"].keys())[0]]["class"])
+                self.client.instances[str(self.client.msg["INIT_MIRROR"][list(self.client.msg["INIT_MIRROR"].keys())[0]]["sender"])] = class_()
 
     def update(self):
         self.parse_client_msg()
@@ -198,10 +210,12 @@ class playerBase(Entity):
 
 if __name__ == "__main__":
     app = Ursina()
+    camera.position = (-20,0,0)
+    plane = Entity(model="plane", texture="brick", scale=5, collision=True, rotation_z=90, double_sided=True)
+    plane.collider = "mesh"
+    camera.look_at(plane)
+
     lc = lobbyClient()
     lc.connect_btn.on_click = lc.connect_to_server
     lc.disconnect_btn.on_click = lc.disconnect_from_server
-    EditorCamera()
-    Entity(model="plane", texture="brick", scale=5)
-
     app.run()
