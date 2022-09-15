@@ -23,6 +23,7 @@ class Handler(server_base):
             #print(message)
             
             if len(self.clients)==2 and time.time()-self.gametimer>10:
+                pass
                 server_init_mirror_message = {"class":"mushroomMirror","sender":"server","id":self.server_entity_id}
                 self.server_entity_id += 1
                 temp_msg = {"INIT_MIRROR":{"INIT_MIRROR":server_init_mirror_message}}
@@ -96,11 +97,7 @@ class lobbyClient(Entity):
 if __name__ == "__main__":
     app= Ursina()
     lobbyClient()
-    camera.position = (0,50,0)
+
     plane = Entity(model="plane", texture="brick", scale=50, double_sided=True)
-    camera.look_at(plane)
-    
-    def update():
-        camera.z += (held_keys["w"]-held_keys["s"])*time.dt*20
-        camera.x -= (held_keys["a"]-held_keys["d"])*time.dt*20
+    EditorCamera()
     app.run()
