@@ -1,4 +1,3 @@
-from turtle import position
 from ursina import *
 from direct.actor.Actor import Actor
 from panda3d.core import Material
@@ -7,6 +6,7 @@ from numpy import degrees
 from entity_scripts import HealthBar
 from entity_scripts import Tower
 from entity_scripts import Draggable
+from entity_scripts import serverBehaviorMinions
 
 class cubeMirror(Entity):
     def __init__(self, **kwargs):
@@ -25,7 +25,7 @@ class mushroomMirror(Entity):
         self.actor = Actor("assets/models/Mushroom.gltf")
         myMaterial = Material()
         myMaterial.setShininess(1.0) # Make this material shiny
-        myMaterial.setAmbient((1, 1, 1, 1)) # Make this material blue
+        myMaterial.setAmbient((0, 0, 0, 0)) # Make this material blue
         self.actor.setMaterial(myMaterial)
         self.actor.setH(180)
         self.actor.reparent_to(self)
@@ -54,7 +54,7 @@ class cactusMirror(Entity):
         self.actor = Actor("assets/models/Cactus.gltf")
         myMaterial = Material()
         myMaterial.setShininess(1.0) # Make this material shiny
-        myMaterial.setAmbient((1, 1, 1, 1)) # Make this material blue
+        myMaterial.setAmbient((0, 0, 0, 0)) # Make this material blue
         self.actor.setMaterial(myMaterial)
         self.actor.setH(0)
         self.actor.reparent_to(self)
@@ -91,6 +91,7 @@ class boidContainer(Entity):
             for x in range(6):
                 self.boids[self.id] = mushroomMirror(position=(-20+random.random(),0,-20+random.random()))
                 self.gtec.red += self.boids[self.id],
+                self.id += 1
         if self.mirror_type == "green":
             #print("creating green boids")
             for x in range(6):
@@ -106,75 +107,6 @@ class boidContainer(Entity):
         for i, j  in self.boids.items():
             j.position += (self.center-j.position)*time.dt*0.1
 
-class serverBehaviorMinions():
-    def __init__(self, entity, actor, hostile, key_positions=None, **kwargs):
-        self.actor = actor
-        self.entity = entity
-        self.key_positions = key_positions
-        self.key_positions_index = 0
-        self.tick_rate = 1
-        self.last_tick = time.time()
-        self.hostile = hostile
-        self.is_attacking = 1
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        self.goal_vector = (Vec3(self.key_positions[self.key_positions_index])-self.entity.position).normalized()
-        self.actor.loop("Walk")
-        self.bite_front = self.actor.getAnimControl("Bite_Front")
-        self.bite_front.setPlayRate(0.5)
-        self.death = self.actor.getAnimControl("Death")
-        self.death_flag = False
-
-    def animate_next_key_positions(self):
-        #print(f'if {time.time()-self.last_tick} > {self.tick_rate} and {self.key_positions_index != 5}')
-        if time.time()-self.last_tick > self.tick_rate and self.key_positions_index != 10:
-            self.goal_vector = (Vec3(self.key_positions[self.key_positions_index])-self.entity.position).normalized()
-            self.last_tick = time.time()
-            #print(f'if {distance(self.entity.position, self.key_positions[self.key_positions_index])}<{1}')
-            if distance(self.entity.position, self.key_positions[self.key_positions_index])<1:
-                self.key_positions_index += 1
-                self.goal_vector = (Vec3(self.key_positions[self.key_positions_index])-self.entity.position).normalized()
-                #print(f'animating to {self.key_positions[self.key_positions_index]}')
-                #self.invoke_animate_position(ent=self.entity, pos=self.key_positions[self.key_positions_index])
-
-    def check_collision(self):
-        intersect_vector = Vec3(0,0,0)
-        self.entity.collisions = self.entity.intersects(traverse_target=scene, ignore=(self,))
-        #print(f'collisions: {self.entity.collisions.entities}')
-        for v in self.entity.collisions.entities:
-            intersect_vector += v.position-self.entity.position
-            if hasattr(v, "team") and self.is_attacking != 0:
-                if v.team != self.entity.team:
-                    self.attacking = v
-                    self.is_attacking = 0
-        return intersect_vector
-    
-    def _is_attacking(self):
-        if self.is_attacking == 0 and not self.bite_front.isPlaying() and not self.death.isPlaying():
-            self.attacking.health -= 5
-            self.actor.play("Bite_Front")
-            if self.attacking.health < 0:
-                self.is_attacking = 1
-                self.attacking = None
-
-    def _health_under_zero(self):
-        if self.entity.health<0 and not self.death.isPlaying() and self.death_flag is False:
-            self.actor.play("Death")
-            invoke(setattr, self.entity, "enabled", False, delay=2)
-            #self.entity.fade_out(value=0, duration=.5)  
-            self.death_flag = True
-
-    def update(self):
-        if self.death_flag is False:
-            self._health_under_zero()
-            self.animate_next_key_positions()
-            vec = self.check_collision()
-            self._is_attacking()
-            resulting_vec = (-vec + self.goal_vector*self.is_attacking).normalized()
-            resulting_rot_y = degrees(arctan2(resulting_vec[0], resulting_vec[2]))
-            self.entity.position += resulting_vec*time.dt
-            self.entity.rotation_y = lerp(self.entity.rotation_y, resulting_rot_y, t=0.01)
-
 class actorMirror(Entity):
     def __init__(self, actor, gtec = None, tower = None, **kwargs):
         super().__init__()
@@ -182,7 +114,7 @@ class actorMirror(Entity):
         self.model = actor
         #self.actor = Actor("self.actor")
         myMaterial = Material()
-        myMaterial.setShininess(1.0) # Make this material shiny
+        myMaterial.setShininess(1) # Make this material shiny
         myMaterial.setAmbient((0, 0, 0, 0)) # Make this material blue
         self.model.setMaterial(myMaterial)
         self.model.setH(180)
@@ -214,9 +146,10 @@ class globalTeamEntityContainer():
 if __name__ == "__main__":
     app= Ursina()
     #some light
-    pivot = Entity()
-    alight = AmbientLight(parent=pivot, y=2, z=3, shadows=False)
-    alight.attenuation = (0.05, 0.2, 0.2)
+    pivot = Entity(position=(0,20,0))
+    alight = DirectionalLight(parent=pivot, y=2, z=3, shadows=True)
+    plight = PointLight(parent=pivot, y=2, x=3, z=3, shadows=True)
+    #alight.attenuation = (0.05, 0.2, 0.2)
     alight.setColor((1, 1, 1, 1))
     #camera.position = (0,50,0)
     plane = Entity(model="plane", texture="brick", scale=50, double_sided=True)
@@ -235,13 +168,19 @@ if __name__ == "__main__":
     structs.append(actorMirror(actor="assets/models/OBJ/Temple_FirstAge_Level1.obj", position = (-23,0,-23), team="red", health=5000, tower=True, gtec=gtec, enemy_team="green"))
     structs.append(actorMirror(actor="assets/models/OBJ/Temple_FirstAge_Level1.obj", position = (23,0,23), team="green", health=5000, tower=True, gtec=gtec, enemy_team="red"))
 
-    #actorMirror(actor="assets\models\OBJ\Mountain_Single.obj", position = (0,0,0), scale=2)
-    actorMirror(actor="assets\models\OBJ\Mountain_Group_1.obj", position = (0,0,0), scale=(4,2,4))
+    actorMirror(actor="assets\models\OBJ\Mountain_Single.obj", position = (0,0,0), scale=2)
+    #actorMirror(actor="assets\models\OBJ\Resource_Tree_Group.obj", position = (10,0,10), scale=2)
+    actorMirror(actor="assets\models\OBJ\Mountain_Group_1.obj", position = (0,0,0), scale=2)
     #actorMirror(actor="assets\models\OBJ\Mountain_Group_2.obj", position = (-10,0,0), scale=4)
     #actorMirror(actor="assets\models\OBJ\MountainLarge_Single.obj", position = (0,0,10), scale=2)
+    actorMirror(actor="assets\models\OBJ\WonderWalls_FirstAge.obj", position=(0,0,10), scale=2)
+    actorMirror(actor="assets\models\OBJ\Wall_FirstAge.obj", position=(0,0,10), scale=2)
+    actorMirror(actor="assets\models\OBJ\Wall_FirstAge.obj", position=(0,0,10), scale=2)
+    actorMirror(actor="assets\models\OBJ\WonderWalls_FirstAge.obj", position=(0,0,10), scale=2)
+    actorMirror(actor="assets\models\OBJ\WonderWalls_FirstAge.obj", position=(0,0,10), scale=2)
     mine = actorMirror(actor="assets\models\OBJ\Mine.obj", position = (-25,0,25), scale=2)
-    actorMirror(actor="assets\models\OBJ\Farm_SecondAge_Level3_Wheat", position = (25,0,-25), scale=2)
-    #mine.add_script(Draggable(entity=mine))
+    actorMirror(actor="assets\models\OBJ\Farm_SecondAge_Level1.obj", position = (25,0,-25), scale=2)
+    mine.add_script(Draggable(entity=mine))
     for x in structs:
         setattr(x, "scale", 2)
 
@@ -251,7 +190,7 @@ if __name__ == "__main__":
     boidContainer(mirror_type="green", gtec=gtec)
     global_time = [time.time()]
     def update():
-        if time.time() - global_time[0] > 10:
+        if time.time() - global_time[0] > 30:
             boidContainer(mirror_type="red", gtec=gtec)
             boidContainer(mirror_type="green", gtec=gtec)
             global_time[0] = time.time()
