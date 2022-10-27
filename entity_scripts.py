@@ -1,6 +1,7 @@
 from ursina import *
 from numpy import arctan2
 from numpy import degrees
+from ursina.trigger import Trigger
 
 class HealthBar():
     def __init__(self, entity, max_health, color):
